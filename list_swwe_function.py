@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.sparse import diags
+from scipy.sparse import identity
 import list_initial_conditions as lic
 import list_ibvp_solution as lisol
 import list_swwe_function as lsf
@@ -29,7 +30,7 @@ def linearswwe_RHS(quantity, time_local, constants):
     """The right hand side of the linearised shallow water wave equations."""
     
     # Unpack the constants
-    x,H,U,g,_,alpha,_,Q,A,P_inv,_, SAT,manufactured_solution, _ = constants
+    x,H,U,g,_,alpha,_,Q,A,P_inv,_,_, SAT,manufactured_solution, _ = constants
     h, u = quantity
 
     # Set the manufactured solution 
@@ -66,7 +67,7 @@ def linearswwe_RHS(quantity, time_local, constants):
 def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
 
     #unpacking constants
-    x,H,U,_,c,_,flowtype,_,_,_,_,_,_, generated_wave_data = constants
+    x,H,U,_,c,_,flowtype,_,_,_,_,_,_,_, generated_wave_data = constants
 
     #unpacking q
     h, u = quantity
@@ -188,14 +189,15 @@ def linearised_SWWE_matrix_supportive(n: int,delta_x: float) -> tuple[np.ndarray
 
     P_inv = diags(np.hstack([2, np.ones(n-2), 2])/delta_x)
 
-    pde_matrices = Q, A, P_inv 
+    I_N = identity(n)
+    pde_matrices = Q, A, P_inv, I_N
     return pde_matrices
     # ---- end setup ---- # 
 
 
-def numerical_solution(initial_quantity:np.ndarray, simulation_time:float, time_step:float, constants: tuple):
+def numerical_solution_linear(initial_quantity:np.ndarray, simulation_time:float, time_step:float, constants: tuple):
     """Solve the PDE using the Runge Kutta 4 method."""
-    _,_,_,_,_,_,_,_,_,_,RHS_function,_,_,_ = constants
+    _,_,_,_,_,_,_,_,_,_,_,RHS_function,_,_,_ = constants
     
     # initiate solution at time = 0
     local_time = 0
@@ -218,7 +220,7 @@ def numerical_solution(initial_quantity:np.ndarray, simulation_time:float, time_
 
 def analytical_solution_mms(x_array:np.ndarray, simulation_time:float, time_step:float, constants):
     """Calculate the analytical solution to the PDE."""
-    x_array,H,U,g,_,_,_,_,_,_,_, _,manufactured_solution, _ = constants
+    x_array,H,U,g,_,_,_,_,_,_,_,_, _,manufactured_solution, _ = constants
     # calculate the analytical solution
     local_time = 0
     q__, _ = manufactured_solution(x_array,0, H,U)
@@ -234,7 +236,7 @@ def analytical_solution_mms(x_array:np.ndarray, simulation_time:float, time_step
 
 def analytical_solution_routine(x_array:np.ndarray, simulation_time, time_step,constants):
     """Calculate the analytical solution to the PDE."""
-    x_array,H,U,g,_,_,_,_,_,_,_, _,_, analytical_solution = constants
+    x_array,H,U,g,_,_,_,_,_,_,_, _,_,_, analytical_solution = constants
     # calculate the analytical solution
     local_time = 0
     solution = []
@@ -243,4 +245,70 @@ def analytical_solution_routine(x_array:np.ndarray, simulation_time, time_step,c
         solution.append(solution1)
         local_time += time_step
 
+    return solution
+
+
+def nonlinear_swwe_RHS(quantity, time_local, constants):
+    """The right hand side of the nonlinear shallow water wave equations."""
+    # Unpack the constants
+    x,H,U,g,_,alpha,_,Q,A,P_inv,I_N,_, SAT,manufactured_solution, _ = constants
+    h, u = quantity
+
+    # Set the manufactured solution 
+    if manufactured_solution is False:
+        mms_list = [[0,0],[0,0]]
+        f1, f2 = 0, 0
+    else:
+        mms_list = manufactured_solution(x, time_local, H, U)
+        _, F = mms_list
+        f1, f2 = F
+
+    # calling SAT terms 
+    SAT__ = SAT(quantity,time_local,constants,mms_list)
+
+    SAT_terms_1 = SAT__[0]
+    SAT_terms_2 = SAT__[1] 
+
+    # Right hand side of the equation
+    # based on equation (27)
+
+    RHS_h = -(I_N*(Q)@(u*h)             - (alpha/2)*A@h ) + SAT_terms_1
+    RHS_u = -(I_N*(Q)@(u**2*h + g*h**2) - (alpha/2)*A@u ) + SAT_terms_1 * U + SAT_terms_2 * H
+
+    # moving out to the right hand side of the equation
+    # and multiply with P_inverse to let the PDE ready to solve with
+    # Runge Kutta (rk4 function in this code)
+    RHS_h = P_inv@(RHS_h) + f1
+    RHS_u = P_inv@(RHS_u) + f2
+    
+    RHS = np.array([RHS_h, RHS_u])
+    return RHS
+
+def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:float, time_step:float, constants: tuple):
+    """Solve the PDE using the Runge Kutta 4 method."""
+    # _,_,_,_,_,_,_,_,_,_,_,RHS_function,_,_,_ = constants
+    x,H,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, RHS_function, SAT_function, mms_flag, generated_wave  = constants
+    
+    # initiate solution at time = 0
+    local_time = 0
+    quantity__ = copy(initial_quantity)
+
+    # solution = np.array([quantity])
+    solution = [quantity__]
+    while local_time < simulation_time: 
+        # calculate the new quantity with Runge-Kutta4 method
+        k1 = RHS_function(quantity__,                        local_time,                  constants)
+        k2 = RHS_function(quantity__ + 0.5 * k1 * time_step, local_time + 0.5* time_step, constants)
+        k3 = RHS_function(quantity__ + 0.5 * k2 * time_step, local_time + 0.5* time_step, constants)
+        k4 = RHS_function(quantity__ +       k3 * time_step, local_time +      time_step, constants)
+
+        quantity__ += (k1 + 2*k2 + 2*k3 + k4)*time_step/6
+        # solution.append(quantity)
+        solution = np.vstack((solution,[quantity__]))
+        h__, _= quantity__
+        #update constants
+        constants = x,h__,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
+            RHS_function, SAT_function, \
+            mms_flag, generated_wave 
+        local_time += time_step
     return solution
