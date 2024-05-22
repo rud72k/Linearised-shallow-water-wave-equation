@@ -32,7 +32,7 @@ def linearswwe_RHS(quantity, time_local, constants):
     # Unpack the constants
     x,H,U,g,_,alpha,_,Q,A,P_inv,_,_, SAT,manufactured_solution, _ = constants
     h, u = quantity
-
+    
     # Set the manufactured solution 
     
     if manufactured_solution is False:
@@ -92,8 +92,14 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
 
     # based on equation (14)
     # turn h and u into dimensionless h/H and u/c
-    w_1 = ((h-h_analytic_mms)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
-    w_2 = ((h-h_analytic_mms)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
+
+    # ver1. the original without add the average height
+    # w_1 = ((h-h_analytic_mms-H)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
+    # w_2 = ((h-h_analytic_mms-H)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
+
+    # ver2. add the H to the perturbation height
+    w_1 = ((h-h_analytic_mms-H)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
+    w_2 = ((h-h_analytic_mms-H)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
 
 
     # based on proof of theorem 9,10,11
@@ -166,8 +172,13 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
             
     SAT = -(1/2)*np.array([W_inv_S[0,0]*SAT__[ 0] +  W_inv_S[0,1]*SAT__[ 1],
                            W_inv_S[1,0]*SAT__[ 0] +  W_inv_S[1,1]*SAT__[ 1]])
-    
+
     return SAT
+
+def SWE_SAT_terms_no_SAT(quantity,time_local,constants, mms_list):
+    x,_,_,_,_,_,_,_,_,_,_,_,_,_, _ = constants
+    n = len(x)
+    return np.zeros((2,n))
 
 def linearised_SWWE_matrix_supportive(n: int,delta_x: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -252,8 +263,8 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
     """The right hand side of the nonlinear shallow water wave equations."""
     # Unpack the constants
     x,H,U,g,_,alpha,_,Q,A,P_inv,I_N,_, SAT,manufactured_solution, _ = constants
-    h, u = quantity
-
+    h, uh = quantity
+    u = uh/h
     # Set the manufactured solution 
     if manufactured_solution is False:
         mms_list = [[0,0],[0,0]]
@@ -262,26 +273,53 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
         mms_list = manufactured_solution(x, time_local, H, U)
         _, F = mms_list
         f1, f2 = F
-
+        
+    quantity_nonconservative = np.array([h-H,u])
     # calling SAT terms 
-    SAT__ = SAT(quantity,time_local,constants,mms_list)
+    SAT__ = SAT(quantity_nonconservative,time_local,constants,mms_list)
 
     SAT_terms_1 = SAT__[0]
     SAT_terms_2 = SAT__[1] 
 
+    # print(f"Sat terms 1: {SAT_terms_1[0],SAT_terms_1[-1]}")
+    # print(f"Sat terms 2: {SAT_terms_2[0],SAT_terms_2[-1]}")
+    # print(f"-------------------")
+
     # Right hand side of the equation
     # based on equation (27)
 
-    RHS_h = -(I_N*(Q)@(u*h)             - (alpha/2)*A@h ) + SAT_terms_1
-    RHS_u = -(I_N*(Q)@(u**2*h + g*h**2) - (alpha/2)*A@u ) + SAT_terms_1 * U + SAT_terms_2 * H
+    # # ver1.2 use fixed A matrix
+    # RHS_h  = - I_N*(Q)@(uh)               + (alpha/2)*A@h + SAT_terms_1
+    # RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2) + (alpha/2)*A@uh + SAT_terms_1 * U + SAT_terms_2 * H
+
+    # ver1.3 use variable A matrix alpha = max(|u| + sqrt(g*h))
+    
+    alphas = np.maximum(np.abs(u - np.sqrt(g*h)),np.abs(u + np.sqrt(g*h)))
+
+    A_diag_up = alphas[1:]
+    A_diag_up[0] = alphas[0]
+
+    A_diag_down = alphas[:-1]
+    A_diag_down[-1] = alphas[-1]
+
+    A_diag_0  = -2*alphas
+    A_diag_0[0] = -alphas[0]
+    A_diag_0[-1] = -alphas[-1]    
+
+    A = diags([A_diag_up, A_diag_0, A_diag_down], [1, 0, -1])
+    print(A)
+    
+    RHS_h  = - I_N*(Q)@(uh)               + (1/2)*A@h + SAT_terms_1
+    RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2) + (1/2)*A@uh + SAT_terms_1 * u + SAT_terms_2 * h
+
 
     # moving out to the right hand side of the equation
     # and multiply with P_inverse to let the PDE ready to solve with
     # Runge Kutta (rk4 function in this code)
     RHS_h = P_inv@(RHS_h) + f1
-    RHS_u = P_inv@(RHS_u) + f2
+    RHS_uh = P_inv@(RHS_uh) + f2
     
-    RHS = np.array([RHS_h, RHS_u])
+    RHS = np.array([RHS_h, RHS_uh])
     return RHS
 
 def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:float, time_step:float, constants: tuple):
