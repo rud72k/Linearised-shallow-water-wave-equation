@@ -78,7 +78,7 @@ def initial_condition(x_coord: np.ndarray,
                                   4 = dam break with almost dry bed
                                   5 = flat profile with step bottom
                                   6 = custom init_height_with_step_function_center 
-                                  8 = step function.
+                                  8 = flat profile with height = H 
 
     Returns:
     tuple[float, float]: The initial height and speed.

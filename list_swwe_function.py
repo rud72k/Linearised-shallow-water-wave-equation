@@ -174,7 +174,6 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
             
     # multiply SAT__ with (-1/2)W_inv_S kron I to get the proper terms for SAT
 
-
     SAT = -(1/2)*np.array([W_inv_S[0,0]*SAT__[ 0] +  W_inv_S[0,1]*SAT__[ 1],
                            W_inv_S[1,0]*SAT__[ 0] +  W_inv_S[1,1]*SAT__[ 1]])
 
@@ -321,8 +320,23 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
 
     A = diags([A_diag_up, A_diag_0, A_diag_down], [1, 0, -1])
     
-    RHS_h  = - I_N*(Q)@(uh)               + (1/2)*A@h    + SAT_terms_1
-    RHS_uh = - I_N*(Q)@(u*uh + g*h**2/2)  + (1/2)*A@uh   + SAT_terms_1 * u + SAT_terms_2 * h
+    RHS_h  = - I_N*(Q)@(uh)                 + (1/2)*A@h    
+    RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2/2) + (1/2)*A@uh   
+
+    RHS_h += SAT_terms_1
+    RHS_uh += SAT_terms_1 * u + SAT_terms_2 * h 
+
+    # print(f"h[0]: {h[0]}")
+    # print(f"h[-1]: {h[-1]}")
+    # print(f"SAT_terms_1[0]: {SAT_terms_1[0]}")
+    # print(f"SAT_terms_1[-1]: {SAT_terms_1[-1]}")
+
+    # print(f"u[0] = {u[0]}")
+    # print(f"u[-1] = {u[-1]}")
+    # print(f"SAT_terms_2[0]: {SAT_terms_2[0]}")
+    # print(f"SAT_terms_2[-1]: {SAT_terms_2[-1]}")
+
+
 
     # moving out to the right hand side of the equation
     # and multiply with P_inverse to let the PDE ready to solve with
@@ -345,6 +359,7 @@ def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:fl
     quantity__ = copy(initial_quantity)
     solution = [quantity__]
     while local_time < simulation_time: 
+        # print(f"local_time: {local_time}")
         # calculate the new quantity with Runge-Kutta4 method
         k1 = RHS_function(quantity__,                        local_time,                  constants)
         k2 = RHS_function(quantity__ + 0.5 * k1 * time_step, local_time + 0.5* time_step, constants)
@@ -358,9 +373,9 @@ def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:fl
 
         h__, _= quantity__
         #update constants
-        constants = x,h__[0],U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
-            RHS_function, SAT_function, \
-            mms_flag, generated_wave 
+        # constants = x,H,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
+        #     RHS_function, SAT_function, \
+        #     mms_flag, generated_wave 
         local_time += time_step
     return solution
 
