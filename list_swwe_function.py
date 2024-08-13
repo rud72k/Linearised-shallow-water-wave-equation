@@ -65,8 +65,13 @@ def linearswwe_RHS(quantity, time_local, constants):
     return RHS
 
 def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
+    '''
+    This function is to calculate the SAT terms for the linearised SWWE
+    The boundary condition for this SAT function is transmissive boundary condition.
+    The input of the quantity are the perturbations, h and u
+    '''
 
-    #unpacking constants
+    # unpacking constants
     x,H,U,_,c,_,flowtype,_,_,_,_,_,_,_, generated_wave_data = constants
 
     #unpacking q
@@ -86,7 +91,7 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
     # Some variables based on equation (13)
     lambda1 = U + c
     lambda2 = U - c
-    
+
     S = (1/np.sqrt(2))*np.array([[1,1],
                                  [1,-1]]) 
 
@@ -94,13 +99,12 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
     # turn h and u into dimensionless h/H and u/c
 
     # ver1. the original without add the average height
-    # w_1 = ((h-h_analytic_mms-H)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
-    # w_2 = ((h-h_analytic_mms-H)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
+    # w_1 = ((h-h_analytic_mms)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
+    # w_2 = ((h-h_analytic_mms)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
 
     # ver2. add the H to the perturbation height
     w_1 = ((h-h_analytic_mms-H)/H + (u-u_analytic_mms)/c)/np.sqrt(2)
     w_2 = ((h-h_analytic_mms-H)/H - (u-u_analytic_mms)/c)/np.sqrt(2)
-
 
     # based on proof of theorem 9,10,11
     W_inv = np.diag([H,c])
@@ -169,7 +173,8 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
                                tau_02*eN*(BC__2)])
             
     # multiply SAT__ with (-1/2)W_inv_S kron I to get the proper terms for SAT
-            
+
+
     SAT = -(1/2)*np.array([W_inv_S[0,0]*SAT__[ 0] +  W_inv_S[0,1]*SAT__[ 1],
                            W_inv_S[1,0]*SAT__[ 0] +  W_inv_S[1,1]*SAT__[ 1]])
 
@@ -180,7 +185,7 @@ def SWE_SAT_terms_no_SAT(quantity,time_local,constants, mms_list):
     n = len(x)
     return np.zeros((2,n))
 
-def linearised_SWWE_matrix_supportive(n: int,delta_x: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def linearised_SWWE_matrix_supportive(n: int,delta_x: float):
     """
     Create the matrices A, Q, and P_inv for the PDE.
 
@@ -207,7 +212,9 @@ def linearised_SWWE_matrix_supportive(n: int,delta_x: float) -> tuple[np.ndarray
 
 
 def numerical_solution_linear(initial_quantity:np.ndarray, simulation_time:float, time_step:float, constants: tuple):
-    """Solve the PDE using the Runge Kutta 4 method."""
+    """Solve the PDE using the Runge Kutta 4 method.
+    Input and output would be in the form of the perturbation of the height and velocity.
+    """
     _,_,_,_,_,_,_,_,_,_,_,RHS_function,_,_,_ = constants
     
     # initiate solution at time = 0
@@ -259,10 +266,14 @@ def analytical_solution_routine(x_array:np.ndarray, simulation_time, time_step,c
     return solution
 
 
+# Non-linear SWWE 
+
 def nonlinear_swwe_RHS(quantity, time_local, constants):
     """The right hand side of the nonlinear shallow water wave equations."""
     # Unpack the constants
-    x,H,U,g,_,alpha,_,Q,A,P_inv,I_N,_, SAT,manufactured_solution, _ = constants
+    
+    x,H,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, RHS_function, SAT, manufactured_solution, generated_wave  = constants
+    
     h, uh = quantity
     u = uh/h
     # Set the manufactured solution 
@@ -274,16 +285,18 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
         _, F = mms_list
         f1, f2 = F
         
-    quantity_nonconservative = np.array([h-H,u])
+    quantity_nonconservative = np.array([h-H,u-U]) # perturbation h, u 
+    
     # calling SAT terms 
-    SAT__ = SAT(quantity_nonconservative,time_local,constants,mms_list)
+    constants_for_SAT = x,H,U,g,np.sqrt(g*H),  \
+        alpha,flowtype,Q,A,P_inv,I_N, RHS_function, SAT, manufactured_solution, generated_wave
+    
 
-    SAT_terms_1 = SAT__[0]
-    SAT_terms_2 = SAT__[1] 
+    SAT__linear = SAT(quantity_nonconservative,time_local,constants_for_SAT,mms_list)
 
-    # print(f"Sat terms 1: {SAT_terms_1[0],SAT_terms_1[-1]}")
-    # print(f"Sat terms 2: {SAT_terms_2[0],SAT_terms_2[-1]}")
-    # print(f"-------------------")
+
+    SAT_terms_1 = SAT__linear[0]
+    SAT_terms_2 = SAT__linear[1] 
 
     # Right hand side of the equation
     # based on equation (27)
@@ -307,18 +320,16 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
     A_diag_0[-1] = -alphas[-1]    
 
     A = diags([A_diag_up, A_diag_0, A_diag_down], [1, 0, -1])
-    print(A)
     
-    RHS_h  = - I_N*(Q)@(uh)               + (1/2)*A@h + SAT_terms_1
-    RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2) + (1/2)*A@uh + SAT_terms_1 * u + SAT_terms_2 * h
-
+    RHS_h  = - I_N*(Q)@(uh)               + (1/2)*A@h    + SAT_terms_1
+    RHS_uh = - I_N*(Q)@(u*uh + g*h**2/2)  + (1/2)*A@uh   + SAT_terms_1 * u + SAT_terms_2 * h
 
     # moving out to the right hand side of the equation
     # and multiply with P_inverse to let the PDE ready to solve with
     # Runge Kutta (rk4 function in this code)
     RHS_h = P_inv@(RHS_h) + f1
     RHS_uh = P_inv@(RHS_uh) + f2
-    
+
     RHS = np.array([RHS_h, RHS_uh])
     return RHS
 
@@ -329,9 +340,9 @@ def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:fl
     
     # initiate solution at time = 0
     local_time = 0
-    quantity__ = copy(initial_quantity)
 
     # solution = np.array([quantity])
+    quantity__ = copy(initial_quantity)
     solution = [quantity__]
     while local_time < simulation_time: 
         # calculate the new quantity with Runge-Kutta4 method
@@ -341,12 +352,15 @@ def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:fl
         k4 = RHS_function(quantity__ +       k3 * time_step, local_time +      time_step, constants)
 
         quantity__ += (k1 + 2*k2 + 2*k3 + k4)*time_step/6
+
         # solution.append(quantity)
         solution = np.vstack((solution,[quantity__]))
+
         h__, _= quantity__
         #update constants
-        constants = x,h__,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
+        constants = x,h__[0],U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
             RHS_function, SAT_function, \
             mms_flag, generated_wave 
         local_time += time_step
     return solution
+
