@@ -68,7 +68,7 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
     '''
     This function is to calculate the SAT terms for the linearised SWWE
     The boundary condition for this SAT function is transmissive boundary condition.
-    The input of the quantity are the perturbations, h and u
+    The input of the quantity h and u
     '''
 
     # unpacking constants
@@ -114,6 +114,7 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
     g_1 = generated_wave_data(time_local) if generated_wave_data is not False else 0
     g_2 = 0                                 # can be change into some function if needed
 
+    # to-do: calculate g_1 again if there is a generated wave
 
     if flowtype == 'subcritical':
 
@@ -284,9 +285,12 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
         _, F = mms_list
         f1, f2 = F
         
-    quantity_nonconservative = np.array([h-H,u-U]) # perturbation h, u 
+    # perturbation of the height and velocity to be used in the SAT terms
+    # quantity_nonconservative = np.array([h-H,u-U]) # perturbation h, u 
+    quantity_nonconservative = np.array([h,u]) # perturbation h, u 
     
     # calling SAT terms 
+    
     constants_for_SAT = x,H,U,g,np.sqrt(g*H),  \
         alpha,flowtype,Q,A,P_inv,I_N, RHS_function, SAT, manufactured_solution, generated_wave
     
@@ -294,16 +298,17 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
     SAT__linear = SAT(quantity_nonconservative,time_local,constants_for_SAT,mms_list)
 
 
-    SAT_terms_1 = SAT__linear[0]
-    SAT_terms_2 = SAT__linear[1] 
+    SAT_terms_1 = SAT__linear[0]    # h
+    SAT_terms_2 = SAT__linear[1]    # u
 
     # Right hand side of the equation
     # based on equation (27)
 
-    # # ver1.2 use fixed A matrix
-    # RHS_h  = - I_N*(Q)@(uh)               + (alpha/2)*A@h + SAT_terms_1
-    # RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2) + (alpha/2)*A@uh + SAT_terms_1 * U + SAT_terms_2 * H
+    # ---------------------- #
+    # # ver1.2 use fixed A matrix 
+    # ---------------------- #
 
+    # ---------------------- #
     # ver1.3 use variable A matrix alpha = max(|u| + sqrt(g*h))
     
     alphas = np.maximum(np.abs(u - np.sqrt(g*h)),np.abs(u + np.sqrt(g*h)))
@@ -319,12 +324,14 @@ def nonlinear_swwe_RHS(quantity, time_local, constants):
     A_diag_0[-1] = -alphas[-1]    
 
     A = diags([A_diag_up, A_diag_0, A_diag_down], [1, 0, -1])
-    
+    # ---------------------- #
+
     RHS_h  = - I_N*(Q)@(uh)                 + (1/2)*A@h    
     RHS_uh = - I_N*(Q)@(uh**2/h + g*h**2/2) + (1/2)*A@uh   
 
     RHS_h += SAT_terms_1
-    RHS_uh += SAT_terms_1 * u + SAT_terms_2 * h 
+    # RHS_uh += SAT_terms_1 * u + SAT_terms_2 * h 
+    RHS_uh += SAT_terms_1 * U + SAT_terms_2 * H 
 
     # print(f"h[0]: {h[0]}")
     # print(f"h[-1]: {h[-1]}")
@@ -376,6 +383,8 @@ def numerical_solution_nonlinear(initial_quantity:np.ndarray, simulation_time:fl
         # constants = x,H,U,g,c,alpha,flowtype,Q,A,P_inv,I_N, \
         #     RHS_function, SAT_function, \
         #     mms_flag, generated_wave 
+
         local_time += time_step
+
     return solution
 
