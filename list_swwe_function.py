@@ -115,6 +115,7 @@ def linearised_SWWE_SAT_terms(quantity,time_local,constants, mms_list):
     g_2 = 0                                 # can be change into some function if needed
 
     # to-do: calculate g_1 again if there is a generated wave
+    g_1 = g_1 - H 
 
     if flowtype == 'subcritical':
 
